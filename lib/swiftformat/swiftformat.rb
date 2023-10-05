@@ -2,8 +2,10 @@ require "logger"
 
 module Danger
   class SwiftFormat
+  
     def initialize(path = nil)
       @path = path || "swiftformat"
+      @lintError = "Source input did not pass lint check."
     end
 
     def installed?
@@ -19,20 +21,22 @@ module Danger
         cmd << swiftversion
       end
 
-      cmd << %w(--lint --lenient)
+      cmd << %w(--lint --quiet)
       stdout, stderr, status = Cmd.run(cmd.flatten)
 
-      output = stdout.empty? ? stderr : stdout
-      raise "Error running SwiftFormat: Empty output." unless output
-
-      output = output.strip.no_color
-
-      if status && !status.success?
-        raise "Error running SwiftFormat:\nError: #{output}"
+      if stderr.strip.eql? @lintError 
+        output = @lintError 
       else
-        raise "Error running SwiftFormat: Empty output." if output.empty?
+        output = stdout.empty? ? stderr : stdout
+        if status && !status.success?
+          raise "Error running SwiftFormat:\nError: #{output}"
+        else
+          raise "Error running SwiftFormat: Empty output." if output.empty?
+        end
+          output = output.strip.no_color
       end
-
+      raise "Error running SwiftFormat: Empty output." unless output
+  
       process(output)
     end
 
@@ -51,13 +55,20 @@ module Danger
 
     def errors(output)
       errors = []
-      output.scan(ERRORS_REGEX) do |match|
-        next if match.count < 2
-
+      if output.eql? @lintError 
         errors << {
-            file: match[0].sub("#{Dir.pwd}/", ""),
-            rules: match[1].split(",").map(&:strip)
+            file: "Unknown",
+            rules: ["lint"]
         }
+      else
+        output.scan(ERRORS_REGEX) do |match|
+          next if match.count < 2
+
+          errors << {
+              file: match[0].sub("#{Dir.pwd}/", ""),
+              rules: match[1].split(",").map(&:strip)
+          }
+        end
       end
       errors
     end
@@ -67,6 +78,8 @@ module Danger
     def run_time(output)
       if RUNTIME_REGEX.match(output)
         RUNTIME_REGEX.match(output)[1]
+      elsif output.eql? @lintError 
+        @lintError
       else
         logger = Logger.new($stderr)
         logger.error("Invalid run_time output: #{output}")
